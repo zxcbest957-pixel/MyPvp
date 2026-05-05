@@ -1,0 +1,111 @@
+-- Custom Clan Promoter by Antigravity
+-- Optimized for Bedwars Lobby: 6872265039
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+
+local LOBBY_ID = 6872265039
+local MESSAGES_COUNT = 3
+local WAIT_TIME = 7
+
+local Quotes = {
+    "Join MyPvP clan! It's the best clan for winners!!!",
+    "Join in MyPvP clan is best clan!!! Join now!",
+    "Looking for a pro clan? Join MyPvP today!",
+    "MyPvP is recruiting! Join the best clan in Bedwars!",
+    "Be part of something big! Join MyPvP clan now!",
+    "Join MyPvP clan - we dominate every match!",
+    "Want to win? Join MyPvP clan, the best choice!",
+    "Join MyPvP, we are looking for skilled Bedwars players!",
+    "MyPvP clan is the #1 choice for competitive play. Join us!",
+    "Looking for teammates? Join MyPvP clan!",
+    "The road to victory starts with MyPvP clan. Join now!",
+    "Join MyPvP - the most active clan in Bedwars!",
+    "Don't play alone! MyPvP clan is recruiting!",
+    "MyPvP clan: Quality over quantity. Join the elite!",
+    "Experience the best with MyPvP clan. Join today!",
+    "Join the legends in MyPvP clan! Best clan ever!",
+    "MyPvP clan is now open! Come and join the best!",
+    "Want to be a pro? Start by joining MyPvP clan!",
+    "MyPvP clan is waiting for you. Join for the wins!",
+    "Join MyPvP and dominate the leaderboard with us!"
+}
+
+-- Глобальный индекс для последовательного перебора (чтобы не повторяться)
+shared.MyPvP_LastIndex = shared.MyPvP_LastIndex or 0
+
+local function getNextQuote()
+    shared.MyPvP_LastIndex = (shared.MyPvP_LastIndex % #Quotes) + 1
+    local quote = Quotes[shared.MyPvP_LastIndex]
+    
+    -- Добавляем немного случайности (символы в конце), чтобы сообщение было уникальным для фильтра
+    local suffixes = {"", " !", " !!", " .", " ..", " <", " >", " ^"}
+    return quote .. suffixes[math.random(1, #suffixes)]
+end
+
+-- Глобальный список посещенных серверов
+shared.MyPvP_Session = shared.MyPvP_Session or {}
+
+local function send(text)
+    pcall(function()
+        local remote = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if remote and remote:FindFirstChild("SayMessageRequest") then
+            remote.SayMessageRequest:FireServer(text, "All")
+        else
+            local textChat = game:GetService("TextChatService")
+            if textChat and textChat.TextChannels and textChat.TextChannels.RBXGeneral then
+                textChat.TextChannels.RBXGeneral:SendAsync(text)
+            end
+        end
+    end)
+end
+
+local function startJump()
+    print("[System] Searching for a new lobby...")
+    table.insert(shared.MyPvP_Session, game.JobId)
+
+    local success, response = pcall(function()
+        return game:HttpGet("https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&sortOrder=Desc")
+    end)
+
+    if success then
+        local json = HttpService:JSONDecode(response)
+        local pool = {}
+
+        if json and json.data then
+            for _, s in pairs(json.data) do
+                if s.id ~= game.JobId and s.playing < s.maxPlayers and not table.find(shared.MyPvP_Session, s.id) then
+                    table.insert(pool, s.id)
+                end
+            end
+        end
+
+        if #pool > 0 then
+            local nextId = pool[math.random(1, #pool)]
+            print("[System] Moving to lobby: "..nextId)
+            TeleportService:TeleportToPlaceInstance(LOBBY_ID, nextId, Players.LocalPlayer)
+        else
+            print("[System] No new lobbies. Clearing cache...")
+            shared.MyPvP_Session = {}
+            task.wait(1)
+            startJump()
+        end
+    else
+        task.wait(5)
+        startJump()
+    end
+end
+
+task.spawn(function()
+    print("Promoter Started on ID: "..LOBBY_ID)
+    task.wait(5)
+
+    for i = 1, MESSAGES_COUNT do
+        send(getNextQuote())
+        task.wait(WAIT_TIME)
+    end
+
+    startJump()
+end)
