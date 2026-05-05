@@ -64,36 +64,46 @@ end
 
 local function startJump()
     print("[System] Searching for a new lobby...")
-    table.insert(shared.MyPvP_Session, game.JobId)
+    
+    -- Track current server to avoid immediate return
+    if not table.find(shared.MyPvP_Session, game.JobId) then
+        table.insert(shared.MyPvP_Session, game.JobId)
+    end
 
-    local success, response = pcall(function()
-        return game:HttpGet("https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&sortOrder=Desc")
-    end)
-
-    if success then
+    local function find(cursor)
+        local url = "https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&excludeFullGames=true"
+        if cursor then url = url .. "&cursor=" .. cursor end
+        
+        local success, response = pcall(function() return game:HttpGet(url) end)
+        if not success then return nil end
+        
         local json = HttpService:JSONDecode(response)
+        if not json or not json.data then return nil end
+        
         local pool = {}
-
-        if json and json.data then
-            for _, s in pairs(json.data) do
-                if s.id ~= game.JobId and s.playing < s.maxPlayers and not table.find(shared.MyPvP_Session, s.id) then
-                    table.insert(pool, s.id)
-                end
+        for _, s in pairs(json.data) do
+            if s.id ~= game.JobId and not table.find(shared.MyPvP_Session, s.id) then
+                table.insert(pool, s.id)
             end
         end
-
+        
         if #pool > 0 then
-            local nextId = pool[math.random(1, #pool)]
-            print("[System] Moving to lobby: "..nextId)
-            TeleportService:TeleportToPlaceInstance(LOBBY_ID, nextId, Players.LocalPlayer)
-        else
-            print("[System] No new lobbies. Clearing cache...")
-            shared.MyPvP_Session = {}
-            task.wait(1)
-            startJump()
+            return pool[math.random(1, #pool)]
+        elseif json.nextPageCursor then
+            return find(json.nextPageCursor)
         end
+        return nil
+    end
+
+    local target = find()
+    
+    if target then
+        print("[System] Moving to lobby: "..target)
+        TeleportService:TeleportToPlaceInstance(LOBBY_ID, target, Players.LocalPlayer)
     else
-        task.wait(5)
+        print("[System] No available lobbies found. Resetting history...")
+        shared.MyPvP_Session = {game.JobId}
+        task.wait(2)
         startJump()
     end
 end
@@ -109,3 +119,19 @@ task.spawn(function()
 
     startJump()
 end)
+
+-- [Antigravity] Auto-Reload System (Loader-based)
+-- Uses your GitHub repository to ensure the script reloads on every server join
+local queue_on_teleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queueonteleport
+if queue_on_teleport then
+    local loaderUrl = "https://raw.githubusercontent.com/zxcbest957-pixel/MyPvp/refs/heads/main/spam%20MyPvP.txt"
+    queue_on_teleport([[
+        task.wait(5)
+        if not game:IsLoaded() then game.Loaded:Wait() end
+        print("[Antigravity] Auto-reloading via Remote Loader...")
+        pcall(function()
+            loadstring(game:HttpGet("]]..loaderUrl..[[", true))()
+        end)
+    ]])
+    print("[Antigravity] Loader Persistence Active.")
+end
