@@ -87,11 +87,23 @@ local function huntProPlayers()
                     local wins = profile.wins or profile.totalWins or 0
                     if wins >= MIN_WINS then
                         print("[Pro-Hunter] Found Talent: " .. player.Name .. " (" .. wins .. " wins). Inviting...")
-                        inviteRemote:InvokeServer({
-                            userId = player.UserId,
-                            name = player.Name,
-                            displayName = player.DisplayName
-                        }, myClanId)
+                        
+                        -- InvokeServer возвращает результат (true/false или таблицу)
+                        local inviteSuccess, inviteResult = pcall(function()
+                            return inviteRemote:InvokeServer({
+                                userId = player.UserId,
+                                name = player.Name,
+                                displayName = player.DisplayName
+                            }, myClanId)
+                        end)
+
+                        if inviteSuccess and (inviteResult == true or (type(inviteResult) == "table" and (inviteResult.success or not inviteResult.error))) then
+                            print("[Pro-Hunter] ✅ INVITE SENT SUCCESSFULLY to " .. player.Name)
+                        else
+                            local reason = "Already in clan/invited"
+                            if type(inviteResult) == "table" and inviteResult.error then reason = inviteResult.error end
+                            print("[Pro-Hunter] ⚠️ Invite for " .. player.Name .. " might have failed (" .. tostring(reason) .. ")")
+                        end
                     end
                 end
             end)
