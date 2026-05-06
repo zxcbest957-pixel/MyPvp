@@ -1,8 +1,8 @@
--- [Antigravity] Clan Promoter & Pro-Hunter v8.1 (Fuzzy-Search Edition)
--- Оптимизировано: Исправлен поиск Profile Remote и ошибки шрифтов.
+-- [Antigravity] Clan Promoter & Pro-Hunter v8.2 (Adaptive Search Edition)
+-- Optimized for Bedwars Lobby persistence and recruitment.
 
 print("---------------------------------------")
-print("[MyPvP] SCRIPT INITIALIZING v8.1...")
+print("[MyPvP] SCRIPT INITIALIZING v8.2...")
 print("---------------------------------------")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,6 +21,7 @@ local loaderUrl = "https://raw.githubusercontent.com/zxcbest957-pixel/MyPvp/refs
 
 -- === SESSION STATE ===
 shared.MyPvP_Session = shared.MyPvP_Session or {}
+shared.MyPvP_LastIndex = shared.MyPvP_LastIndex or 0
 shared.MyPvP_Stats = shared.MyPvP_Stats or { Invites = 0, ProsSeen = 0, ServersVisited = #shared.MyPvP_Session }
 
 -- === 1. PERSISTENCE ===
@@ -30,91 +31,133 @@ if queue_on_teleport then
         queue_on_teleport([[
             repeat task.wait() until game:IsLoaded()
             task.wait(5)
+            print("[MyPvP] RELOADING FROM TELEPORT...")
             loadstring(game:HttpGet("]]..loaderUrl..[[", true))()
         ]])
     end)
 end
 
--- === 2. UI (FIXED FONTS) ===
+-- === 2. UI (STATUS OVERLAY) ===
 local function createUI()
     local CoreGui = game:GetService("CoreGui")
     if CoreGui:FindFirstChild("MyPvP_Status") then CoreGui.MyPvP_Status:Destroy() end
-    local sg = Instance.new("ScreenGui", CoreGui); sg.Name = "MyPvP_Status"
+
+    local sg = Instance.new("ScreenGui", CoreGui)
+    sg.Name = "MyPvP_Status"
+    
     local frame = Instance.new("Frame", sg)
-    frame.Size = UDim2.new(0, 220, 0, 100); frame.Position = UDim2.new(1, -230, 0, 50)
-    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25); frame.BorderSizePixel = 0
+    frame.Size = UDim2.new(0, 220, 0, 100)
+    frame.Position = UDim2.new(1, -230, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    frame.BorderSizePixel = 0
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+    
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Color = Color3.fromRGB(100, 100, 255)
+    stroke.Thickness = 2
+    stroke.Transparency = 0.5
+
     local title = Instance.new("TextLabel", frame)
-    title.Size = UDim2.new(1, 0, 0, 30); title.Text = "🛡️ MyPvP CLAN BOT v8.1"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255); title.Font = Enum.Font.SourceSansBold
-    title.TextSize = 16; title.BackgroundTransparency = 1
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Text = "🛡️ MyPvP CLAN BOT v8.2"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 16
+    title.BackgroundTransparency = 1
+
     local status = Instance.new("TextLabel", frame)
-    status.Size = UDim2.new(1, 0, 0, 60); status.Position = UDim2.new(0, 0, 0, 35)
-    status.TextColor3 = Color3.fromRGB(200, 200, 200); status.Font = Enum.Font.SourceSans
-    status.TextSize = 14; status.BackgroundTransparency = 1
+    status.Size = UDim2.new(1, 0, 0, 60)
+    status.Position = UDim2.new(0, 0, 0, 35)
+    status.TextColor3 = Color3.fromRGB(200, 200, 200)
+    status.Font = Enum.Font.SourceSans
+    status.TextSize = 14
+    status.BackgroundTransparency = 1
+    
     task.spawn(function()
         while task.wait(1) do
+            if not frame then break end
             status.Text = "Invites: " .. shared.MyPvP_Stats.Invites .. "\nPros Found: " .. shared.MyPvP_Stats.ProsSeen .. "\nServers: " .. #shared.MyPvP_Session
         end
     end)
 end
 pcall(createUI)
 
--- === 3. SMART REMOTE RESOLVER ===
+-- === 3. REMOTE UTILITIES ===
 local function getNetManaged()
-    return ReplicatedStorage:WaitForChild("rbxts_include", 5):WaitForChild("node_modules", 5):WaitForChild("@rbxts", 5):WaitForChild("net", 5):WaitForChild("out", 5):WaitForChild("_NetManaged", 5)
+    local success, res = pcall(function()
+        return ReplicatedStorage:WaitForChild("rbxts_include", 5):WaitForChild("node_modules", 5):WaitForChild("@rbxts", 5):WaitForChild("net", 5):WaitForChild("out", 5):WaitForChild("_NetManaged", 5)
+    end)
+    return success and res or nil
 end
 
-local function getRemote(keyword)
+local function getRemote(keyword, isProfileSearch)
     local net = getNetManaged()
     if not net then return nil end
     
-    -- 1. Сначала ищем по точному совпадению
     local exact = net:FindFirstChild(keyword)
     if exact then return exact end
 
-    -- 2. Если не нашли, ищем по ключевому слову (Fuzzy search)
-    local lowerKey = keyword:lower():gsub(".*/", "") -- берем последнюю часть пути
+    local searchKey = keyword:lower():gsub(".*/", "")
     for _, v in pairs(net:GetChildren()) do
-        if v.Name:lower():find(lowerKey) then
-            print("[MyPvP] Found remote by fuzzy search: " .. v.Name .. " for key: " .. keyword)
+        local nameLower = v.Name:lower()
+        -- Skip clan remotes if searching for player stats
+        if isProfileSearch and nameLower:find("clans/") then continue end
+        
+        if nameLower:find(searchKey) then
+            print("[MyPvP] Adaptive match found: " .. v.Name .. " for " .. keyword)
             return v
         end
     end
-    
-    -- 3. Если совсем ничего, выводим список (для дебага)
-    warn("[MyPvP] Could not find remote: " .. keyword)
     return nil
 end
 
--- === 4. PRO-HUNTER ===
+-- === 4. PRO-HUNTER LOGIC ===
 local function huntProPlayers()
-    print("[MyPvP] INITIALIZING PRO-HUNTER...")
-    local profileRemote = getRemote("Bedwars/GetPlayerProfile") or getRemote("GetPlayerProfile") or getRemote("Profile")
-    local inviteRemote = getRemote("Clans/InvitePlayerToClan") or getRemote("InvitePlayerToClan") or getRemote("ClanInvite")
+    print("[MyPvP] INITIALIZING PRO-HUNTER SCAN...")
+    local net = getNetManaged()
     
-    if not profileRemote or not inviteRemote then
-        print("[MyPvP] DEBUG: List of available remotes in _NetManaged:")
-        local net = getNetManaged()
+    local profileRemote = getRemote("Bedwars/GetPlayerStatistics", true) 
+        or getRemote("Bedwars/GetPlayerProfile", true) 
+        or getRemote("GetPlayerProfile", true)
+        or getRemote("GetPlayerStatistics", true)
+
+    local inviteRemote = getRemote("Clans/InvitePlayerToClan") or getRemote("InvitePlayerToClan")
+    
+    if not profileRemote then
+        warn("[MyPvP] CRITICAL: Profile Remote not found! Listing Player remotes:")
         if net then
-            for _, v in pairs(net:GetChildren()) do print(" - " .. v.Name) end
+            for _, v in pairs(net:GetChildren()) do
+                if v.Name:lower():find("player") then print(" - " .. v.Name) end
+            end
         end
-        return
     end
+
+    if not (profileRemote and inviteRemote) then return end
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             task.spawn(function()
-                local success, profile = pcall(function() return profileRemote:InvokeServer(player.UserId) end)
-                if success and profile then
-                    local wins = profile.wins or profile.totalWins or (profile.Data and profile.Data.wins) or 0
+                local success, data = pcall(function() return profileRemote:InvokeServer(player.UserId) end)
+                if success and data then
+                    local wins = data.wins or data.totalWins or (data.Data and data.Data.wins) or (data.statistics and data.statistics.wins) or 0
                     if wins >= MIN_WINS then
                         shared.MyPvP_Stats.ProsSeen = shared.MyPvP_Stats.ProsSeen + 1
-                        print("[MyPvP] PRO: " .. player.Name .. " (" .. wins .. " wins)")
-                        pcall(function()
-                            inviteRemote:InvokeServer({userId = player.UserId, name = player.Name, displayName = player.DisplayName}, CLAN_ID)
-                            shared.MyPvP_Stats.Invites = shared.MyPvP_Stats.Invites + 1
+                        print("[MyPvP] PRO DETECTED: " .. player.Name .. " (" .. wins .. " wins)")
+                        
+                        local invSuccess, invRes = pcall(function()
+                            return inviteRemote:InvokeServer({
+                                userId = player.UserId,
+                                name = player.Name,
+                                displayName = player.DisplayName
+                            }, CLAN_ID)
                         end)
+                        
+                        if invSuccess then
+                            shared.MyPvP_Stats.Invites = shared.MyPvP_Stats.Invites + 1
+                            print("[MyPvP] ✅ SUCCESS: Invited " .. player.Name)
+                        else
+                            warn("[MyPvP] ❌ FAILED: Could not invite " .. player.Name)
+                        end
                     end
                 end
             end)
@@ -123,42 +166,93 @@ local function huntProPlayers()
     end
 end
 
--- === 5. CHAT & JUMP ===
+-- === 5. CHAT & SERVER HOP ===
 local function send(text)
     pcall(function()
         local remote = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
         if remote and remote:FindFirstChild("SayMessageRequest") then
             remote.SayMessageRequest:FireServer(text, "All")
         else
-            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
+            local tcs = game:GetService("TextChatService")
+            if tcs and tcs.TextChannels:FindFirstChild("RBXGeneral") then
+                tcs.TextChannels.RBXGeneral:SendAsync(text)
+            end
         end
     end)
 end
 
+local Quotes = {
+    "Join MyPvP clan! It's the best clan for winners!!!",
+    "Join in MyPvP clan is best clan!!! Join now!",
+    "Looking for a pro clan? Join MyPvP today!",
+    "MyPvP is recruiting! Join the best clan in Bedwars!",
+    "Be part of something big! Join MyPvP clan now!",
+    "Join MyPvP clan - we dominate every match!",
+    "Want to win? Join MyPvP clan, the best choice!",
+    "Join MyPvP, we are looking for skilled Bedwars players!",
+    "MyPvP clan is the #1 choice for competitive play. Join us!",
+    "Looking for teammates? Join MyPvP clan!"
+}
+
 local function jump()
     print("[MyPvP] SERVER HOPPING...")
-    if not table.find(shared.MyPvP_Session, game.JobId) then table.insert(shared.MyPvP_Session, game.JobId) end
-    local function fetch()
-        local url = "https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&excludeFullGames=true"
-        local success, res = pcall(function() return game:HttpGet(url) end)
-        if not success then return end
-        local data = HttpService:JSONDecode(res)
-        for _, s in pairs(data.data) do
-            if s.id ~= game.JobId and not table.find(shared.MyPvP_Session, s.id) then return s.id end
-        end
+    if not table.find(shared.MyPvP_Session, game.JobId) then
+        table.insert(shared.MyPvP_Session, game.JobId)
     end
-    local target = fetch()
-    if target then TeleportService:TeleportToPlaceInstance(LOBBY_ID, target, LocalPlayer) end
+
+    local function fetchServers(cursor)
+        local url = "https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&excludeFullGames=true"
+        if cursor then url = url .. "&cursor=" .. cursor end
+        local success, res = pcall(function() return game:HttpGet(url) end)
+        if not success then return nil end
+        local data = HttpService:JSONDecode(res)
+        if not data or not data.data then return nil end
+        
+        local possible = {}
+        for _, s in pairs(data.data) do
+            if s.id ~= game.JobId and not table.find(shared.MyPvP_Session, s.id) then
+                table.insert(possible, s.id)
+            end
+        end
+        
+        if #possible > 0 then return possible[math.random(1, #possible)] end
+        if data.nextPageCursor then return fetchServers(data.nextPageCursor) end
+        return nil
+    end
+
+    local nextSrv = fetchServers()
+    if nextSrv then
+        TeleportService:TeleportToPlaceInstance(LOBBY_ID, nextSrv, LocalPlayer)
+    else
+        print("[MyPvP] No fresh servers. Resetting history...")
+        shared.MyPvP_Session = {game.JobId}
+        task.wait(3)
+        jump()
+    end
 end
 
--- === 6. MAIN ===
+-- === 6. MAIN EXECUTION ===
 task.spawn(function()
     repeat task.wait() until game:IsLoaded()
+    print("[MyPvP] SCRIPT ACTIVE IN PLACE: " .. game.PlaceId)
     task.wait(3)
+    
+    -- 1. Scan and Invite
     huntProPlayers()
+    task.wait(2)
+    
+    -- 2. Chat Spam
     for i = 1, MESSAGES_COUNT do
-        send("Join MyPvP clan! Best pro clan! ["..math.random(100,999).."]")
+        shared.MyPvP_LastIndex = (shared.MyPvP_LastIndex % #Quotes) + 1
+        local msg = Quotes[shared.MyPvP_LastIndex] .. " [" .. math.random(100, 999) .. "]"
+        send(msg)
         task.wait(WAIT_TIME)
     end
+    
+    -- 3. Jump
     jump()
 end)
+
+print("---------------------------------------")
+print("[MyPvP] SETUP COMPLETE. BOT RUNNING.")
+print("---------------------------------------")
