@@ -1,14 +1,29 @@
--- Custom Clan Promoter by Antigravity
--- Optimized for Bedwars Lobby: 6872265039
+-- [Antigravity] Clan Promoter & Pro-Hunter v5.0
+-- Лобби: 6872265039 | Авто-инвайт 200+ побед
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
 local LOBBY_ID = 6872265039
+local loaderUrl = "https://raw.githubusercontent.com/zxcbest957-pixel/MyPvp/refs/heads/main/spam%20MyPvP.txt"
+
+-- 1. СИСТЕМА АВТО-ЗАПУСКА
+local queue_on_teleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queueonteleport
+if queue_on_teleport then
+    queue_on_teleport([[
+        task.wait(6)
+        if not game:IsLoaded() then game.Loaded:Wait() end
+        pcall(function() loadstring(game:HttpGet("]]..loaderUrl..[[", true))() end)
+    ]])
+end
+
+-- 2. НАСТРОЙКИ СПАМА
 local MESSAGES_COUNT = 3
 local WAIT_TIME = 7
+local MIN_WINS = 200 -- Порог побед для инвайта
 
 local Quotes = {
     "Join MyPvP clan! It's the best clan for winners!!!",
@@ -20,33 +35,16 @@ local Quotes = {
     "Want to win? Join MyPvP clan, the best choice!",
     "Join MyPvP, we are looking for skilled Bedwars players!",
     "MyPvP clan is the #1 choice for competitive play. Join us!",
-    "Looking for teammates? Join MyPvP clan!",
-    "The road to victory starts with MyPvP clan. Join now!",
-    "Join MyPvP - the most active clan in Bedwars!",
-    "Don't play alone! MyPvP clan is recruiting!",
-    "MyPvP clan: Quality over quantity. Join the elite!",
-    "Experience the best with MyPvP clan. Join today!",
-    "Join the legends in MyPvP clan! Best clan ever!",
-    "MyPvP clan is now open! Come and join the best!",
-    "Want to be a pro? Start by joining MyPvP clan!",
-    "MyPvP clan is waiting for you. Join for the wins!",
-    "Join MyPvP and dominate the leaderboard with us!"
+    "Looking for teammates? Join MyPvP clan!"
 }
 
--- Глобальный индекс для последовательного перебора (чтобы не повторяться)
+shared.MyPvP_Session = shared.MyPvP_Session or {}
 shared.MyPvP_LastIndex = shared.MyPvP_LastIndex or 0
 
-local function getNextQuote()
-    shared.MyPvP_LastIndex = (shared.MyPvP_LastIndex % #Quotes) + 1
-    local quote = Quotes[shared.MyPvP_LastIndex]
-    
-    -- Добавляем немного случайности (символы в конце), чтобы сообщение было уникальным для фильтра
-    local suffixes = {"", " !", " !!", " .", " ..", " <", " >", " ^"}
-    return quote .. suffixes[math.random(1, #suffixes)]
+-- 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+local function getRemote(name)
+    return ReplicatedStorage:WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged"):WaitForChild(name)
 end
-
--- Глобальный список посещенных серверов
-shared.MyPvP_Session = shared.MyPvP_Session or {}
 
 local function send(text)
     pcall(function()
@@ -54,84 +52,100 @@ local function send(text)
         if remote and remote:FindFirstChild("SayMessageRequest") then
             remote.SayMessageRequest:FireServer(text, "All")
         else
-            local textChat = game:GetService("TextChatService")
-            if textChat and textChat.TextChannels and textChat.TextChannels.RBXGeneral then
-                textChat.TextChannels.RBXGeneral:SendAsync(text)
-            end
+            game:GetService("TextChatService").TextChannels.RBXGeneral:SendAsync(text)
         end
     end)
 end
 
-local function startJump()
-    print("[System] Searching for a new lobby...")
-    
-    -- Track current server to avoid immediate return
-    if not table.find(shared.MyPvP_Session, game.JobId) then
-        table.insert(shared.MyPvP_Session, game.JobId)
-    end
+local function getNextQuote()
+    shared.MyPvP_LastIndex = (shared.MyPvP_LastIndex % #Quotes) + 1
+    local quote = Quotes[shared.MyPvP_LastIndex]
+    local suffixes = {"", " !", " !!", " .", " ..", " ^"}
+    return quote .. suffixes[math.random(1, #suffixes)]
+end
 
-    local function find(cursor)
+-- 4. СИСТЕМА ПОИСКА ПРО-ИГРОКОВ (PRO-HUNTER)
+local function huntProPlayers()
+    print("[Antigravity] Starting Pro-Hunter scan...")
+    local getClanRemote = getRemote("Clans/GetMyClan")
+    local profileRemote = getRemote("Bedwars/GetPlayerProfile")
+    local inviteRemote = getRemote("Clans/InvitePlayerToClan")
+    
+    local myClanData = getClanRemote:InvokeServer()
+    if not myClanData or not myClanData.clan or not myClanData.clan.clanId then 
+        warn("[Antigravity] You are not in a clan or clan ID not found!")
+        return 
+    end
+    
+    local myClanId = myClanData.clan.clanId
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            task.spawn(function()
+                local success, profile = pcall(function() return profileRemote:InvokeServer(player.UserId) end)
+                if success and profile and (profile.wins or profile.totalWins) then
+                    local wins = profile.wins or profile.totalWins or 0
+                    if wins >= MIN_WINS then
+                        print("[Pro-Hunter] Found Talent: " .. player.Name .. " (" .. wins .. " wins). Inviting...")
+                        inviteRemote:InvokeServer({
+                            userId = player.UserId,
+                            name = player.Name,
+                            displayName = player.DisplayName
+                        }, myClanId)
+                    end
+                end
+            end)
+            task.wait(0.3) -- Задержка, чтобы не спамить реморты
+        end
+    end
+end
+
+-- 5. СИСТЕМА ПРЫЖКА
+local function startJump()
+    print("[Antigravity] Searching for a new lobby...")
+    table.insert(shared.MyPvP_Session, game.JobId)
+
+    local function findServer(cursor)
         local url = "https://games.roblox.com/v1/games/"..LOBBY_ID.."/servers/Public?limit=100&excludeFullGames=true"
         if cursor then url = url .. "&cursor=" .. cursor end
-        
         local success, response = pcall(function() return game:HttpGet(url) end)
         if not success then return nil end
-        
         local json = HttpService:JSONDecode(response)
-        if not json or not json.data then return nil end
-        
         local pool = {}
         for _, s in pairs(json.data) do
-            if s.id ~= game.JobId and not table.find(shared.MyPvP_Session, s.id) then
-                table.insert(pool, s.id)
-            end
+            if s.id ~= game.JobId and not table.find(shared.MyPvP_Session, s.id) then table.insert(pool, s.id) end
         end
-        
-        if #pool > 0 then
-            return pool[math.random(1, #pool)]
-        elseif json.nextPageCursor then
-            return find(json.nextPageCursor)
-        end
+        if #pool > 0 then return pool[math.random(1, #pool)]
+        elseif json.nextPageCursor then return findServer(json.nextPageCursor) end
         return nil
     end
 
-    local target = find()
-    
+    local target = findServer()
     if target then
-        print("[System] Moving to lobby: "..target)
-        TeleportService:TeleportToPlaceInstance(LOBBY_ID, target, Players.LocalPlayer)
+        TeleportService:TeleportToPlaceInstance(LOBBY_ID, target, LocalPlayer)
     else
-        print("[System] No available lobbies found. Resetting history...")
         shared.MyPvP_Session = {game.JobId}
         task.wait(2)
         startJump()
     end
 end
 
+-- 6. ИСПОЛНЕНИЕ
 task.spawn(function()
-    print("Promoter Started on ID: "..LOBBY_ID)
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    print("[Antigravity] Promoter & Pro-Hunter Active!")
     task.wait(5)
 
+    -- Запускаем охоту на про-игроков
+    huntProPlayers()
+    
+    -- Спамим сообщения
     for i = 1, MESSAGES_COUNT do
         send(getNextQuote())
         task.wait(WAIT_TIME)
     end
 
+    -- Уходим на другой сервер
+    task.wait(2)
     startJump()
 end)
-
--- [Antigravity] Auto-Reload System (Loader-based)
--- Uses your GitHub repository to ensure the script reloads on every server join
-local queue_on_teleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or queueonteleport
-if queue_on_teleport then
-    local loaderUrl = "https://raw.githubusercontent.com/zxcbest957-pixel/MyPvp/refs/heads/main/spam%20MyPvP.txt"
-    queue_on_teleport([[
-        task.wait(5)
-        if not game:IsLoaded() then game.Loaded:Wait() end
-        print("[Antigravity] Auto-reloading via Remote Loader...")
-        pcall(function()
-            loadstring(game:HttpGet("]]..loaderUrl..[[", true))()
-        end)
-    ]])
-    print("[Antigravity] Loader Persistence Active.")
-end
